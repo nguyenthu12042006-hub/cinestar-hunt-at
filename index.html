@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>CineStar Hunt</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#000; overflow:hidden; font-family:-apple-system,sans-serif; }
+
+  #camera {
+    position:fixed; inset:0; width:100%; height:100%;
+    object-fit:cover; z-index:1;
+  }
+  #ar-canvas {
+    position:fixed; inset:0; width:100%; height:100%;
+    z-index:2; pointer-events:none;
+  }
+
+  #ui {
+    position:fixed; inset:0; z-index:3;
+    pointer-events:none;
+    display:flex; flex-direction:column; align-items:center;
+  }
+  #hud-box {
+    margin-top:28px; width:88%;
+    background:rgba(0,0,0,.78); backdrop-filter:blur(10px);
+    border:1.5px solid #7F77DD; border-radius:16px;
+    padding:12px 16px; text-align:center; color:#fff;
+  }
+  #hud-title   { font-size:13px; color:#AFA9EC; margin-bottom:4px; }
+  #hud-arrow   {
+    font-size:24px; font-weight:800; color:#FF9D00;
+    text-shadow:0 0 12px rgba(255,157,0,.6);
+    min-height:32px; line-height:1.2;
+  }
+  #hud-temp    { font-size:13px; margin-top:2px; }
+
+  #radar-bar {
+    position:fixed; top:50%; transform:translateY(-50%);
+    z-index:3; display:none;
+    flex-direction:column; align-items:center; gap:4px;
+  }
+  #radar-bar.left  { left:10px; }
+  #radar-bar.right { right:10px; }
+  .radar-track {
+    width:10px; height:120px;
+    background:rgba(127,119,221,.15); border-radius:5px; overflow:hidden;
+    display:flex; align-items:flex-end;
+  }
+  .radar-fill {
+    width:100%; border-radius:5px;
+    transition:height .15s, background .15s;
+  }
+  #radar-label { font-size:9px; color:#7F77DD; writing-mode:vertical-rl; }
+
+  #catch-btn {
+    position:fixed; bottom:90px; left:50%; transform:translateX(-50%);
+    z-index:4; pointer-events:auto;
+    background:linear-gradient(135deg,#FF9D00,#FF5E00);
+    border:none; border-radius:32px; color:#fff;
+    font-size:20px; font-weight:800;
+    padding:18px 56px;
+    box-shadow:0 0 36px rgba(255,157,0,.6);
+    display:none; cursor:pointer;
+  }
+  #catch-btn:active { transform:translateX(-50%) scale(.96); }
+
+  .screen {
+    position:fixed; inset:0; z-index:10;
+    background:#0a0a14;
+    display:none; flex-direction:column;
+    align-items:center; justify-content:center;
+    padding:32px; text-align:center; color:#fff;
+    gap:14px;
+  }
+  .screen.show { display:flex; }
+
+  .big-title { font-size:28px; font-weight:800; }
+  .sub-text  { font-size:14px; color:#888; line-height:1.6; }
+  .card {
+    background:#161629; border:1px solid #7F77DD;
+    border-radius:16px; padding:20px; width:100%;
+  }
+  .btn {
+    width:100%; padding:16px; border:none; border-radius:14px;
+    font-size:16px; font-weight:700; cursor:pointer;
+    pointer-events:auto;
+  }
+  .btn-primary   { background:#7F77DD; color:#fff; }
+  .btn-secondary { background:#FF9D00; color:#fff; }
+  .btn:active    { opacity:.85; transform:scale(.98); }
+
+  input {
+    background:#161629; border:1.5px solid #7F77DD;
+    border-radius:12px; color:#fff; width:100%;
+    padding:14px; font-size:16px; text-align:center;
+    pointer-events:auto; outline:none;
+  }
+  input::placeholder { color:#555; }
+
+  .v-code {
+    font-size:26px; font-weight:800; letter-spacing:5px;
+    color:#FF9D00; font-family:monospace; margin:6px 0;
+  }
+  .v-label { font-size:12px; color:#888; }
+  .v-desc  { font-size:13px; color:#AFA9EC; }
+
+  #coll-grid {
+    display:grid; grid-template-columns:repeat(3,1fr);
+    gap:10px; width:100%; margin-top:8px;
+  }
+  .coll-card {
+    background:#161629; border:1px solid #222;
+    border-radius:12px; padding:10px 6px;
+    display:flex; flex-direction:column; align-items:center; gap:5px;
+  }
+  .coll-card.owned { border-color:#7F77DD; }
+  .coll-card.epic  { border-color:#EF9F27; }
+  .coll-card video { width:64px; height:64px; object-fit:contain; pointer-events:none; }
+  .coll-card video.dark { filter:grayscale(1) brightness(.2); }
+  .coll-name { font-size:10px; color:#aaa; text-align:center; }
+  .coll-card.owned .coll-name { color:#AFA9EC; }
+
+  #bottom-nav {
+    position:fixed; bottom:0; left:0; right:0; z-index:5;
+    display:flex; background:rgba(10,10,20,.85);
+    backdrop-filter:blur(10px);
+    border-top:1px solid #1a1a2e;
+    pointer-events:auto;
+  }
+  .nav-btn {
+    flex:1; padding:10px 4px 12px;
+    background:none; border:none; color:#555;
+    font-size:9px; display:flex; flex-direction:column;
+    align-items:center; gap:2px; cursor:pointer;
+  }
+  .nav-btn.active { color:#7F77DD; }
+  .nav-icon { font-size:20px; }
+</style>
+</head>
+<body>
+
+<video id="camera" autoplay playsinline muted></video>
+<canvas id="ar-canvas"></canvas>
+
+<div id="ui">
+  <div id="hud-box">
+    <div id="hud-title">Đang dò tìm...</div>
+    <div id="hud-arrow">HÃY XOAY ĐIỆN THOẠI</div>
+    <div id="hud-temp"></div>
+  </div>
+</div>
+
+<div id="radar-bar">
+  <div class="radar-track">
+    <div class="radar-fill" id="radar-fill" style="height:0%;background:#7F77DD"></div>
+  </div>
+  <div id="radar-label">RADAR</div>
+</div>
+
+<button id="catch-btn" onclick="catchItem()">BẮT NGAY! ⚡</button>
+
+<div id="bottom-nav" style="display:none">
+  <button class="nav-btn active" onclick="showGame()">
+    <span class="nav-icon">📷</span>Camera
+  </button>
+  <button class="nav-btn" onclick="showCollection()">
+    <span class="nav-icon">🎒</span>Túi đồ
+  </button>
+  <button class="nav-btn" onclick="showVouchers()">
+    <span class="nav-icon">🎟️</span>Voucher
+  </button>
+</div>
+
+<div id="start-screen" class="screen show">
+  <div style="font-size:56px">🎬</div>
+  <div class="big-title">CineStar Hunt</div>
+  <div class="sub-text">Xoay camera để tìm nhân vật ẩn trong không gian. Thu thập đủ để nhận voucher!</div>
+  <input type="text" id="player-name" placeholder="Nhập tên của bạn...">
+  <button class="btn btn-primary" id="ios-perm-btn" style="display:none" onclick="requestIOSPermission()">
+    Cho phép dùng cảm biến (iOS)
+  </button>
+  <button class="btn btn-secondary" id="start-btn" style="display:none" onclick="startGame()">
+    BẮT ĐẦU CHƠI →
+  </button>
+  <div id="start-status" style="font-size:12px;color:#666"></div>
+</div>
+
+<div id="success-screen" class="screen">
+  <div id="success-emoji" style="font-size:88px"></div>
+  <div class="big-title" style="color:#FF9D00">BẮT THÀNH CÔNG!</div>
+  <div id="success-msg" style="font-size:14px;color:#aaa"></div>
+  <div id="xp-badge" style="background:#1D9E75;color:#9FE1CB; font-size:13px;padding:5px 18px;border-radius:20px;"></div>
+  <div id="voucher-block" class="card" style="display:none">
+    <div class="v-label">🎉 VOUCHER MỚI!</div>
+    <div class="v-code" id="v-code"></div>
+    <div class="v-desc" id="v-desc"></div>
+    <div style="font-size:11px;color:#555;margin-top:6px">Chụp màn hình để dùng tại quầy</div>
+  </div>
+  <div id="progress-info" style="font-size:13px;color:#666;"></div>
+  <button class="btn btn-primary" onclick="continueHunt()">Tiếp tục săn →</button>
+</div>
+
+<div id="collection-screen" class="screen" style="justify-content:flex-start;padding-top:60px">
+  <div class="big-title" style="font-size:20px">🎒 Túi đồ</div>
+  <div id="coll-grid"></div>
+</div>
+
+<div id="voucher-screen" class="screen" style="justify-content:flex-start;padding-top:60px;gap:10px">
+  <div class="big-title" style="font-size:20px">🎟️ Voucher của bạn</div>
+  <div id="voucher-list" style="width:100%;display:flex;flex-direction:column;gap:10px"></div>
+</div>
+
+<script>
+const ITEMS = [
+  { id: 'canhcua', name: 'Cánh Cửa', src: './assets/canhcua.webm', rarity: 'common', glowColor: '#A0C4FF', xp: 50, scale: 0.36 },
+  { id: 'banhmi', name: 'Bánh Mì', src: './assets/banhmi.webm', rarity: 'common', glowColor: '#5DCAA5', xp: 50, scale: 0.40 },
+  { id: 'xebuggy', name: 'Xe Buggy', src: './assets/xebuggy.webm', rarity: 'rare', glowColor: '#7F77DD', xp: 200, scale: 0.44 },
+  { id: 'contau', name: 'Con Tàu', src: './assets/contau.webm', rarity: 'epic', glowColor: '#EF9F27', xp: 350, scale: 0.52 },
+];
+
+const CATCH_ANGLE = 30;
+const ESCAPE_SECS = 20;
+
+const canvas = document.getElementById('ar-canvas');
+const ctx    = canvas.getContext('2d');
+const itemVideos = {};
+
+let playerName  = '';
+let deviceAlpha = 0;
+let alphaOffset = null;
+let itemAlpha   = 0;
+let currentItem = null;
+let itemVisible = false;
+let escapeTimer = null;
+let timeLeft    = ESCAPE_SECS;
+let animTick    = 0;
+let gameRunning = false;
+let gyroWorking = false;
+
+const collection = JSON.parse(localStorage.getItem('cs_col') || '{}');
+const vouchers   = JSON.parse(localStorage.getItem('cs_vch') || '[]');
+
+function resizeCanvas() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+function preloadVideos() {
+  return Promise.all(ITEMS.map(item => new Promise(resolve => {
+    const vid = document.createElement('video');
+    vid.src = item.src;
+    vid.muted = true;
+    vid.playsInline = true;
+    vid.loop = true;
+    vid.autoplay = true;
+    vid.onloadedmetadata = () => {
+      itemVideos[item.id] = vid;
+      vid.play().catch(e => console.log("Lỗi tự động chạy video", e));
+      resolve();
+    };
+    vid.onerror = () => {
+      itemVideos[item.id] = null;
+      resolve();
+    };
+    vid.load();
+  })));
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const needsPermission = isIOS && typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function';
+
+  document.getElementById('start-status').textContent = isIOS ? '📱 iPhone phát hiện' : '📱 Android phát hiện';
+
+  if (needsPermission) {
+    document.getElementById('ios-perm-btn').style.display = 'block';
+  } else {
+    attachGyroscope();
+    document.getElementById('start-btn').style.display = 'block';
+  }
+});
+
+function requestIOSPermission() {
+  DeviceOrientationEvent.requestPermission()
+    .then(result => {
+      if (result === 'granted') {
+        attachGyroscope();
+        document.getElementById('ios-perm-btn').style.display = 'none';
+        document.getElementById('start-btn').style.display    = 'block';
+        document.getElementById('start-status').textContent   = '✅ Cảm biến OK!';
+      } else {
+        document.getElementById('start-status').textContent = '❌ Bị từ chối. Vào Settings > Safari > Motion & Orientation để bật lại.';
+      }
+    })
+    .catch(err => {
+      document.getElementById('start-status').textContent = '❌ Lỗi: ' + err.message;
+    });
+}
+
+function attachGyroscope() {
+  window.addEventListener('deviceorientation', handleOrientation, true);
+}
+
+function handleOrientation(e) {
+  if (e.alpha === null || e.alpha === undefined) return;
+  if (alphaOffset === null) alphaOffset = e.alpha;
+  deviceAlpha = ((e.alpha - alphaOffset) % 360 + 360) % 360;
+  gyroWorking = true;
+}
+
+async function startGame() {
+  playerName = document.getElementById('player-name').value.trim();
+  if (!playerName) {
+    document.getElementById('start-status').textContent = '⚠️ Hãy nhập tên trước!';
+    return;
+  }
+
+  document.getElementById('start-status').textContent = 'Đang bật camera...';
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width:{ideal:1280}, height:{ideal:720} }
+    });
+    document.getElementById('camera').srcObject = stream;
+  } catch (err) {
+    document.getElementById('start-status').textContent = '❌ Không mở được camera. Kiểm tra quyền truy cập.';
+    return;
+  }
+
+  await preloadVideos();
+
+  document.getElementById('start-screen').classList.remove('show');
+  document.getElementById('bottom-nav').style.display = 'flex';
+  gameRunning = true;
+
+  setTimeout(() => {
+    if (!gyroWorking) {
+      document.getElementById('hud-arrow').textContent = '⚠️ Không nhận cảm biến. Kiểm tra quyền trong Settings.';
+    }
+  }, 2000);
+
+  spawnNextItem();
+  requestAnimationFrame(renderLoop);
+}
+
+function spawnNextItem() {
+  const uncaught = ITEMS.filter(i => !collection[i.id]);
+  if (uncaught.length === 0) {
+    document.getElementById('hud-title').textContent = '🏆 Đã bắt tất cả nhân vật!';
+    document.getElementById('hud-arrow').textContent = '';
+    return;
+  }
+
+  currentItem = uncaught[0];
+  itemAlpha   = (deviceAlpha + 90 + Math.random() * 180) % 360;
+  itemVisible = false;
+  timeLeft    = ESCAPE_SECS;
+  animTick    = 0;
+
+  document.getElementById('hud-title').textContent = `Tìm: ${currentItem.name} (${rarityText(currentItem.rarity)})`;
+
+  clearInterval(escapeTimer);
+  escapeTimer = setInterval(() => {
+    timeLeft--;
+    if (timeLeft <= 0) {
+      clearInterval(escapeTimer);
+      currentItem = null;
+      document.getElementById('hud-arrow').textContent = '💨 Trốn mất! Đang tìm cái khác...';
+      document.getElementById('hud-temp').textContent  = '';
+      document.getElementById('catch-btn').style.display = 'none';
+      hideRadar();
+      setTimeout(spawnNextItem, 2500);
+    }
+  }, 1000);
+}
+
+function renderLoop() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  animTick++;
+
+  if (!currentItem || !gameRunning) {
+    requestAnimationFrame(renderLoop);
+    return;
+  }
+
+  let delta = deviceAlpha - itemAlpha;
+  if (delta >  180) delta -= 360;
+  if (delta < -180) delta += 360;
+  const absDelta = Math.abs(delta);
+  const warmth   = Math.max(0, 1 - absDelta / 90);
+
+  if (absDelta < CATCH_ANGLE) {
+    itemVisible = true;
+    hideRadar();
+    document.getElementById('catch-btn').style.display = 'block';
+    document.getElementById('hud-arrow').textContent   = '🎯 ĐÃ THẤY! BẮT NHANH!';
+    document.getElementById('hud-temp').textContent    = `⏱ ${timeLeft}s`;
+
+    const vid = itemVideos[currentItem.id];
+    if (!vid || vid.videoWidth === 0) { requestAnimationFrame(renderLoop); return; }
+
+    const slideX = (delta / CATCH_ANGLE) * canvas.width * 0.18;
+    const cx     = canvas.width / 2 + slideX;
+    const floatY = Math.sin(animTick * 0.045) * 16;
+    const h      = canvas.height * currentItem.scale;
+    const w      = (vid.videoWidth / vid.videoHeight) * h;
+    const cy     = canvas.height * 0.40 + floatY;
+
+    ctx.save();
+    ctx.shadowColor = currentItem.glowColor;
+    ctx.shadowBlur  = 44 + Math.sin(animTick * 0.06) * 14;
+    ctx.drawImage(vid, cx - w/2, cy - h/2, w, h);
+    ctx.restore();
+
+    const ringY = cy + h/2 + 6;
+    const grd   = ctx.createRadialGradient(cx, ringY, 0, cx, ringY, w * 0.5);
+    grd.addColorStop(0, currentItem.glowColor + '55');
+    grd.addColorStop(1, 'transparent');
+    ctx.fillStyle = grd;
+    ctx.beginPath();
+    ctx.ellipse(cx, ringY, w * 0.5, 14, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle   = '#fff';
+    ctx.font        = '600 14px -apple-system,sans-serif';
+    ctx.textAlign   = 'center';
+    ctx.shadowColor = 'rgba(0,0,0,.8)';
+    ctx.shadowBlur  = 6;
+    ctx.fillText(currentItem.name, cx, cy + h/2 + 32);
+    ctx.shadowBlur  = 0;
+
+  } else {
+    itemVisible = false;
+    document.getElementById('catch-btn').style.display = 'none';
+
+    const turnLeft = delta > 0;
+    document.getElementById('hud-arrow').textContent = turnLeft ? '← XOAY SANG TRÁI' : 'XOAY SANG PHẢI →';
+    document.getElementById('hud-temp').textContent =
+      warmth > 0.7 ? '🔥🔥 Rất gần!'
+      : warmth > 0.4 ? '🔥 Gần rồi!'
+      : warmth > 0.2 ? '♨️  Ấm lên...'
+      :                '❄️  Còn xa...';
+
+    showRadar(!turnLeft, warmth);
+
+    if (warmth > 0.4) {
+      for (let i = 0; i < 3; i++) {
+        const px = canvas.width * (turnLeft ? 0.1 : 0.9) + (Math.random()-0.5)*30;
+        const py = canvas.height * (0.3 + Math.random()*0.4);
+        ctx.beginPath();
+        ctx.arc(px, py, 2 + Math.random()*2, 0, Math.PI*2);
+        ctx.fillStyle = currentItem.glowColor + Math.floor(warmth * 80 + 40).toString(16);
+        ctx.fill();
+      }
+    }
+  }
+
+  requestAnimationFrame(renderLoop);
+}
+
+function showRadar(isRight, warmth) {
+  const bar  = document.getElementById('radar-bar');
+  const fill = document.getElementById('radar-fill');
+  bar.className     = isRight ? 'right' : 'left';
+  bar.style.display = 'flex';
+  fill.style.height = Math.round(warmth * 100) + '%';
+  fill.style.background = warmth > 0.7 ? '#FF5E00' : warmth > 0.4 ? '#FF9D00' : '#7F77DD';
+}
+function hideRadar() {
+  document.getElementById('radar-bar').style.display = 'none';
+}
+
+function catchItem() {
+  if (!currentItem || !itemVisible) return;
+  clearInterval(escapeTimer);
+
+  const item  = currentItem;
+  currentItem = null;
+  document.getElementById('catch-btn').style.display = 'none';
+  hideRadar();
+
+  collection[item.id] = { name:item.name, xp:item.xp, ts:Date.now() };
+  localStorage.setItem('cs_col', JSON.stringify(collection));
+
+  const total = Object.keys(collection).length;
+
+  const emojiMap = { common:'⚪', uncommon:'🟢', rare:'🟣', epic:'🌟' };
+  document.getElementById('success-emoji').textContent = emojiMap[item.rarity] || '🎬';
+  document.getElementById('success-msg').textContent  = `${playerName} đã bắt được ${item.name}!`;
+  document.getElementById('xp-badge').textContent     = `+${item.xp} XP · ${item.rarity.toUpperCase()}`;
+
+  const vBlock = document.getElementById('voucher-block');
+  if (total === 2 || total === ITEMS.length) {
+    const code = 'CS-' + Math.random().toString(36).toUpperCase().slice(2,8);
+    const desc = total === 2 ? 'Giảm 10% Combo Bắp Nước' : 'Upsize Miễn Phí + Ưu tiên chọn ghế';
+    document.getElementById('v-code').textContent = code;
+    document.getElementById('v-desc').textContent = desc;
+    vBlock.style.display = 'block';
+    saveVoucher(code, desc);
+  } else {
+    vBlock.style.display = 'none';
+  }
+
+  document.getElementById('progress-info').textContent = `${total}/${ITEMS.length} nhân vật · ${ITEMS.length - total} còn lại`;
+  document.getElementById('success-screen').classList.add('show');
+}
+
+function saveVoucher(code, desc) {
+  vouchers.push({ code, desc, used:false, expires: Date.now() + 7*24*60*60*1000 });
+  localStorage.setItem('cs_vch', JSON.stringify(vouchers));
+}
+
+function continueHunt() {
+  document.getElementById('success-screen').classList.remove('show');
+  showGame();
+  spawnNextItem();
+}
+
+function showGame() {
+  ['collection-screen','voucher-screen','success-screen'].forEach(id => document.getElementById(id).classList.remove('show'));
+  document.querySelectorAll('.nav-btn').forEach((b,i) => b.classList.toggle('active', i===0));
+}
+
+function showCollection() {
+  document.getElementById('collection-screen').classList.add('show');
+  document.querySelectorAll('.nav-btn').forEach((b,i) => b.classList.toggle('active', i===1));
+
+  document.getElementById('coll-grid').innerHTML = ITEMS.map(item => {
+    const owned = collection[item.id];
+    return `
+      <div class="coll-card ${owned?(item.rarity==='epic'?'epic':'owned'):''}">
+        <video src="${item.src}" class="${owned?'':'dark'}" autoplay loop muted playsinline></video>
+        <div class="coll-name">${owned ? item.name : '???'}</div>
+        <div style="font-size:9px;color:#555">
+          ${owned ? '+'+item.xp+' XP' : 'Chưa bắt'}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function showVouchers() {
+  document.getElementById('voucher-screen').classList.add('show');
+  document.querySelectorAll('.nav-btn').forEach((b,i) => b.classList.toggle('active', i===2));
+
+  const list = document.getElementById('voucher-list');
+  if (vouchers.length === 0) {
+    list.innerHTML = '<div style="color:#555;font-size:14px;text-align:center;padding:40px 0">Chưa có voucher. Bắt thêm nhân vật nhé!</div>';
+    return;
+  }
+  list.innerHTML = vouchers.map(v => `
+    <div class="card" style="text-align:left">
+      <div class="v-label">${v.used ? '✓ Đã dùng' : '🟢 Còn hiệu lực'}</div>
+      <div class="v-code" style="font-size:20px">${v.code}</div>
+      <div class="v-desc">${v.desc}</div>
+      <div style="font-size:10px;color:#555;margin-top:6px">
+        HSD: ${new Date(v.expires).toLocaleDateString('vi-VN')}
+      </div>
+    </div>`).join('');
+}
+
+function rarityText(r) {
+  return { common:'Thường', uncommon:'Hiếm', rare:'Hiếm cao', epic:'Siêu hiếm ⭐' }[r] || r;
+}
+</script>
+</body>
+</html>
